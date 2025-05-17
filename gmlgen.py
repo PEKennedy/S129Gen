@@ -162,20 +162,49 @@ def generateUnderKeelClearancePlan(parent,
 	genInner(plan,"underKeelClearancePurpose", ClearancePurposeText[purpose],{"code":str(purpose.value)})
 	genInner(plan,"underKeelClearanceCalculationRequested",CalculationRequestedText[calc],{"code":str(calc.value)})
 
+def genArea(parent, id, genBoundary=False):
+	if genBoundary:
+		generateBoundary(parent,[])
+	geo = etree.SubElement(parent, "geometry")
+	surProperty = etree.SubElement(geo, "S100:surfaceProperty")
+	surface = etree.SubElement(surProperty,"S100:Surface",{
+		"gml:id":id,
+		"srsName":"http://www.opengis.net/def/crs/EPSG/0/4326",
+		"srsDimension":"2"
+		})
+	patches = etree.SubElement(surface,"gml:patches")
+	polygon = etree.SubElement(patches,"gml:PolygonPatch")
+	ext = etree.SubElement(polygon,"gml:exterior")
+	linRing = etree.SubElement(ext,"gml:LinearRing")
+	posList = genInner(linRing,"gml:posList","TODO TODO TODO TODO TODO TODO TODO TODO")
+
 def generatePlanArea(parent):
+	planArea = etree.SubElement(parent,"UnderKeelClearancePlanArea",
+		{"gml:id":"TEST_PLAN_AREA_SAINT_JOHN"})
+	genInner(planArea,"scaleMinimum","1 TODO")
+	genArea(planArea, "TEST_PLAN_AREA_GEOM", True)
 	#TODO: boundary rect...
 	#TODO: scaleMinimum
 	#TODO: URN
 	#TODO: GM_OrientableSurface...
-	pass
 
-def generateNonNavArea(parent):
+def generateNonNavArea(parent, iter=0):
+	id = "NON_NAVIGABLE_"+str(iter)
+	nonNavArea = etree.SubElement(parent,"UnderKeelClearanceNonNavigableArea",
+		{"gml:id":id})
+	genInner(nonNavArea,"scaleMinimum","1 TODO")
+	genArea(nonNavArea,id+"_GEOM")
 	#TODO: scaleMinimum
 	#TODO: URN
 	#TODO: GM_OrientableSurface...
-	pass
 
-def generateAlmostNonNavArea(parent):
+def generateAlmostNonNavArea(parent, iter=0):
+	id = "ALMOST_NON_NAVIGABLE_"+str(iter)
+	almostNonNavArea = etree.SubElement(parent,"UnderKeelClearanceAlmostNonNavigableArea",
+		{"gml:id":id})
+	genInner(almostNonNavArea,"scaleMinimum","1 TODO")
+	genInner(almostNonNavArea, "distanceAboveUKCLimit","0.2 TODO")
+	genArea(almostNonNavArea,id+"_GEOM")
 	#TODO: distanceAboveUKCLimit
 	#TODO: scaleMinimum
 	#TODO: URN
@@ -227,6 +256,9 @@ if __name__ == "__main__":
 	generateDatasetIdentificationInfo(root,fileName)
 	members = etree.SubElement(root,"members")
 	generateUnderKeelClearancePlan(members,maxVesselDraught)
+	generatePlanArea(members)
+	generateNonNavArea(members)
+	generateAlmostNonNavArea(members)
 	for i in range(5):
 		generateClearancePt(members,
 			str(i),
