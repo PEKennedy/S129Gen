@@ -1,2 +1,3 @@
-lxml==5.4.0
-SCons==4.7.0
+pip3-autoremove==1.2.2
+typing_extensions==4.13.2
+urnparse==0.2.2
