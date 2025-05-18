@@ -254,16 +254,18 @@ if __name__ == "__main__":
 	root = generateRoot()
 	generateBoundary(root,[10, 10, -10, -10])
 	generateDatasetIdentificationInfo(root,fileName)
+	
 	members = etree.SubElement(root,"members")
 	generateUnderKeelClearancePlan(members,maxVesselDraught)
 	generatePlanArea(members)
+
 	generateNonNavArea(members)
 	generateAlmostNonNavArea(members)
 	for i in range(5):
 		generateClearancePt(members,
 			str(i),
 			datetime.now() + timedelta(hours=i),
-			i*0.1,
+			1+i*0.1,
 			0.5,
 			-10+i*0.1,140+i*0.1
 		)
