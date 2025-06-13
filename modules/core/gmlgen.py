@@ -1,10 +1,12 @@
-import xml.etree.ElementTree as etree
+from lxml import etree
 import xml.dom.minidom
 from enum import Enum
 from datetime import *
 from urnparse import * 
 
-def genInner(parent, name, text="TODO", attribs={}):
+#""" add to parent a new child with name name, inner text text, and attributes as an object
+#"""
+def genInner(parent:etree.Element, name:str, text:str="TODO", attribs:object={}):
 	child = etree.SubElement(parent,name,attribs)
 	child.text = text
 	return child
@@ -12,14 +14,14 @@ def genInner(parent, name, text="TODO", attribs={}):
 ### Generic datatypes
 
 #12.4 print outs from datetime
-def datetime_out(dt:datetime):
+def datetime_out(dt:datetime) -> str:
 	return datetime.isoformat(dt.replace(tzinfo=None),timespec='seconds') + "Z"
 
 #17.1.1 coordinate 
-def latlong_out(lat:float, long:float, multX:float=1, multY:float=1):
+def latlong_out(lat:float, long:float, multX:float=1, multY:float=1) -> str:
 	# 7 places after the decimal (though trailing 0s could be omitted in the future)
-	assert(lat < 90 and lat > -90)
-	assert(long < 360 and long > -360) #TODO
+	#assert(lat < 90 and lat > -90)
+	#assert(long < 360 and long > -360) #TODO
 	return "{:.7f} {:.7f}".format(lat*multX, long*multY)
 
 ### S-100 (10b-11.6) datatypes
@@ -36,10 +38,23 @@ class datasetPurpose(Enum):
 	base = 1
 	update = 2
 
+#NIWC wants lower case letters
 datasetPurposeText = {
-	datasetPurpose.base: "Base",
-	datasetPurpose.update: "Update"
+	datasetPurpose.base: "base", 
+	datasetPurpose.update: "update"
 }
+
+"""## S100_Purpose (S-100 Part 17, Clause 17-4.5)
+#must be 2 "new edition" (default) or 5 "cancellation"
+#TODO" is this necessary?
+class s100_purpose(Enum):
+    newDataset = 1
+    newEdition = 2
+    update = 3
+    reissue = 4
+    cancellation = 5
+    delta = 6
+"""
 
 ### S-129 datatypes
 
@@ -77,12 +92,12 @@ class featureName:
 	name:str = ""
 	usage:nameUsage = nameUsage.defaultNameDisplay
 
-	def __init__(self, nameIn:str, usageIn:nameUsage=nameUsage.defaultNameDisplay, lang:str="eng"):
+	def __init__(self, nameIn:str, usageIn:nameUsage=nameUsage.defaultNameDisplay, lang:str="eng") -> None:
 		self.language = lang
 		self.name = nameIn
 		self.nameusage = usageIn
 	
-	def gengml(self, parent):
+	def gengml(self, parent:etree.Element) -> None:
 		featureName = etree.SubElement(parent, "featureName")
 		genInner(featureName,"language",self.language)
 		genInner(featureName, "name", self.name)
@@ -92,68 +107,80 @@ class fixedTimeRange:
 	timeStart:datetime
 	timeEnd:datetime
 
-	def __init__(self, startIn:datetime, endIn:datetime):
+	def __init__(self, startIn:datetime, endIn:datetime) -> None:
 		self.timeStart = startIn
 		self.timeEnd = endIn
 
-	def gengml(self, parent):
+	def gengml(self, parent:etree.Element) -> None:
 		range = etree.SubElement(parent, "fixedTimeRange")
 		genInner(range, "timeStart", datetime_out(self.timeStart))
 		genInner(range, "timeEnd", datetime_out(self.timeEnd))
 
+#namespace prefix globals for lxml
+GML = "{http://www.opengis.net/gml/3.2}"
+S100 = "{http://www.iho.int/s100gml/5.0}"
+S129 = "{http://www.iho.int/S129/2.0}"
 
-def generateRoot(id="TODO"):
-	return etree.Element("Dataset",{
-		"xmlns:S100":"http://www.iho.int/s100gml/5.0",
-		"xmlns:gml":"http://www.opengis.net/gml/3.2",
-		"gml:id":id,
-		"xmlns":"http://www.iho.int/S129/2.0"
-	})
+def generateRoot(id:str="TODO") -> etree.Element:
+	nsmap = {
+		None: "http://www.iho.int/S129/2.0", #default namespace
+		"S100":"http://www.iho.int/s100gml/5.0",
+		"gml":"http://www.opengis.net/gml/3.2",
+	}
+	attribs = {
+		GML+"id":id,
+	}
+	el = etree.Element("Dataset",
+                    attrib=attribs,
+                    nsmap=nsmap)
+	return el
 
-def generateBoundary(parent, positions):
-	boundary = etree.SubElement(parent,"gml:boundedBy")
-	envelope = etree.SubElement(boundary,"gml:Envelope",{
+#TODO: get rid of hard coded EPSG, use the one provided by
+#the bathymetry
+def generateBoundary(parent:etree.Element, bounds:object) -> etree.Element:
+	boundary = etree.SubElement(parent,GML+"boundedBy")
+	envelope = etree.SubElement(boundary,GML+"Envelope",{
 		"srsName":"http://www.opengis.net/def/crs/EPSG/0/4326",
 		"srsDimensions":"2"
 	})
-	genInner(envelope,"gml:lowerCorner", latlong_out(10,10))
-	genInner(envelope,"gml:upperCorner", latlong_out(-10,-10))
+	genInner(envelope,GML+"lowerCorner", latlong_out(bounds["min"][0],bounds["min"][1]))
+	genInner(envelope,GML+"upperCorner", latlong_out(bounds["max"][0],bounds["max"][1]))
 	return boundary
 
-def generateDatasetIdentificationInfo(parent, fileName:str, updateNo=0, title="Test Dataset Saint John, NB"):
+def generateDatasetIdentificationInfo(parent:etree.Element, fileName:str, updateNo=0, title="Test Dataset Saint John, NB")  -> etree.Element:
 	profile = applicationProfileText[applicationProfile.base_dataset]
 	purpose = datasetPurposeText[datasetPurpose.base]
 	if updateNo != 0:
 		profile = applicationProfileText[applicationProfile.update_dataset]
 		purpose = datasetPurposeText[datasetPurpose.update]
 		
-	identificatioInfo = etree.SubElement(parent,"S100:DatasetIdentificationInformation")
-	genInner(identificatioInfo,"S100:encodingSpecification","S-100 Part 10b")
-	genInner(identificatioInfo,"S100:encodingSpecificationEdition","1.0")
-	genInner(identificatioInfo,"S100:productIdentifier","S-129")
-	genInner(identificatioInfo,"S100:productEdition","2.0.0")
-	genInner(identificatioInfo,"S100:applicationProfile", profile)
-	genInner(identificatioInfo,"S100:datasetFileIdentifier",fileName)
-	genInner(identificatioInfo,"S100:datasetTitle",title)
-	genInner(identificatioInfo,"S100:datasetReferenceDate",date.isoformat(date.today()))
-	genInner(identificatioInfo,"S100:datasetLanguage","eng")
+	identificatioInfo = etree.SubElement(parent,S100+"DatasetIdentificationInformation")
+	genInner(identificatioInfo,S100+"encodingSpecification","S-100 Part 10b")
+	genInner(identificatioInfo,S100+"encodingSpecificationEdition","1.0")
+	genInner(identificatioInfo,S100+"productIdentifier","S-129")
+	genInner(identificatioInfo,S100+"productEdition","2.0.0")
+	genInner(identificatioInfo,S100+"applicationProfile", profile)
+	genInner(identificatioInfo,S100+"datasetFileIdentifier",fileName)
+	genInner(identificatioInfo,S100+"datasetTitle",title)
+	genInner(identificatioInfo,S100+"datasetReferenceDate",date.isoformat(date.today()))
+	genInner(identificatioInfo,S100+"datasetLanguage","eng")
 	#TODO: "Dataset Abstract"
 
 	#ISO 19115-1 code, but oceans seems to always be the most relevant
-	genInner(identificatioInfo,"S100:datasetTopicCategory","oceans") 
-	genInner(identificatioInfo,"S100:datasetPurpose",purpose)
-	genInner(identificatioInfo,"S100:updateNumber",str(updateNo))
+	genInner(identificatioInfo,S100+"datasetTopicCategory","oceans") 
+	genInner(identificatioInfo,S100+"datasetPurpose",purpose)
+	genInner(identificatioInfo,S100+"updateNumber",str(updateNo))
 	return identificatioInfo
 
-def generateUnderKeelClearancePlan(parent, 
+def generateUnderKeelClearancePlan(parent:etree.Element, 
 		maxDraught:float,
 		routeName:str="Saint John Test Plan",
 		routeVersion:str="1234567", #interop number to specify what S-421 (421.Route.routeEditionNo) or RTZ plan to use 
 		vesselId:str="1234567", #IMO, likely 7 digit number
 		purpose:underKeelClearancePurpose = underKeelClearancePurpose.actualPlan,
 		calc:underKeelClearanceCalculationRequested = underKeelClearanceCalculationRequested.timeWindow,
-		):
-	plan = etree.SubElement(parent,"UnderKeelClearancePlan",{"gml:id":"TODO_Plan_ID"})
+		) -> None:
+	plan = etree.SubElement(parent,"UnderKeelClearancePlan",{GML+"id":"TODO_Plan_ID"})
 	genInner(plan,"generationTime",datetime_out(datetime.now(timezone.utc)))
 	genInner(plan,"vesselID",vesselId)
 	genInner(plan,"sourceRouteName",routeName)
@@ -162,66 +189,71 @@ def generateUnderKeelClearancePlan(parent,
 	genInner(plan,"underKeelClearancePurpose", ClearancePurposeText[purpose],{"code":str(purpose.value)})
 	genInner(plan,"underKeelClearanceCalculationRequested",CalculationRequestedText[calc],{"code":str(calc.value)})
 
-def genArea(parent, id, genBoundary=False):
-	if genBoundary:
-		generateBoundary(parent,[])
+def genArea(parent:etree.Element, id:str, gml:str, bounds:object=None) -> None:
+	if bounds != None:
+		generateBoundary(parent,bounds)
 	geo = etree.SubElement(parent, "geometry")
-	surProperty = etree.SubElement(geo, "S100:surfaceProperty")
-	surface = etree.SubElement(surProperty,"S100:Surface",{
-		"gml:id":id,
+	surProperty = etree.SubElement(geo, S100+"surfaceProperty")
+	surface:etree.Element = etree.SubElement(surProperty,S100+"Surface",{
+	#genInner(surProperty,S100+"Surface",gml,{
+		GML+"id":id,
 		"srsName":"http://www.opengis.net/def/crs/EPSG/0/4326",
 		"srsDimension":"2"
 		})
-	patches = etree.SubElement(surface,"gml:patches")
-	polygon = etree.SubElement(patches,"gml:PolygonPatch")
-	ext = etree.SubElement(polygon,"gml:exterior")
-	linRing = etree.SubElement(ext,"gml:LinearRing")
-	posList = genInner(linRing,"gml:posList","TODO TODO TODO TODO TODO TODO TODO TODO")
+	parser = etree.XMLParser(encoding="utf-8", recover=True)
+	subel:etree.Element = etree.fromstring(gml,parser)
+	surface.append(subel)
+	
+	#patches = etree.SubElement(surface,GML+"patches")
+	#polygon = etree.SubElement(patches,GML+"PolygonPatch")
+	#ext = etree.SubElement(polygon,GML+"exterior")
+	#linRing = etree.SubElement(ext,GML+"LinearRing")
+	#posList = genInner(linRing,GML+"posList","TODO TODO TODO TODO TODO TODO TODO TODO")
 
-def generatePlanArea(parent):
+def generatePlanArea(parent:etree.Element, gml:str, bounds:object) -> None:
 	planArea = etree.SubElement(parent,"UnderKeelClearancePlanArea",
-		{"gml:id":"TEST_PLAN_AREA_SAINT_JOHN"})
-	genInner(planArea,"scaleMinimum","1 TODO")
-	genArea(planArea, "TEST_PLAN_AREA_GEOM", True)
+		{GML+"id":"TEST_PLAN_AREA_SAINT_JOHN"})
+	genInner(planArea,"scaleMinimum","1") #TODO
+	genArea(planArea, "TEST_PLAN_AREA_GEOM", gml, bounds)
 	#TODO: boundary rect...
 	#TODO: scaleMinimum
 	#TODO: URN
 	#TODO: GM_OrientableSurface...
 
-def generateNonNavArea(parent, iter=0):
+def generateNonNavArea(parent:etree.Element, gml:str, iter:int=0) -> None:
 	id = "NON_NAVIGABLE_"+str(iter)
 	nonNavArea = etree.SubElement(parent,"UnderKeelClearanceNonNavigableArea",
-		{"gml:id":id})
-	genInner(nonNavArea,"scaleMinimum","1 TODO")
-	genArea(nonNavArea,id+"_GEOM")
+		{GML+"id":id})
+	genInner(nonNavArea,"scaleMinimum","1") #TODO
+	genArea(nonNavArea,id+"_GEOM", gml)
 	#TODO: scaleMinimum
 	#TODO: URN
 	#TODO: GM_OrientableSurface...
 
-def generateAlmostNonNavArea(parent, iter=0):
+def generateAlmostNonNavArea(parent:etree.Element, gml:str, iter:int=0) -> None:
 	id = "ALMOST_NON_NAVIGABLE_"+str(iter)
 	almostNonNavArea = etree.SubElement(parent,"UnderKeelClearanceAlmostNonNavigableArea",
-		{"gml:id":id})
-	genInner(almostNonNavArea,"scaleMinimum","1 TODO")
-	genInner(almostNonNavArea, "distanceAboveUKCLimit","0.2 TODO")
-	genArea(almostNonNavArea,id+"_GEOM")
+		{GML+"id":id})
+	genInner(almostNonNavArea,"scaleMinimum","1") #TODO
+	genInner(almostNonNavArea, "distanceAboveUKCLimit","0.2") #TODO
+	genArea(almostNonNavArea,id+"_GEOM", gml)
 	#TODO: distanceAboveUKCLimit
 	#TODO: scaleMinimum
 	#TODO: URN
 	#TODO: GM_OrientableSurface...
 	pass
 
-def generatePoint(parent, id:str, lat:float, long:float):
+def generatePoint(parent:etree.Element, id:str, lat:float, long:float) -> etree.Element:
 	geo = etree.SubElement(parent, "geometry")
-	ptProperty = etree.SubElement(geo, "S100:pointProperty")
-	pt = etree.SubElement(ptProperty, "S100:Point", {"gml:id":id})
-	genInner(pt, "gml:pos", latlong_out(lat,long))
+	ptProperty = etree.SubElement(geo, S100+"pointProperty")
+	pt = etree.SubElement(ptProperty, S100+"Point", {GML+"id":id})
+	genInner(pt, GML+"pos", latlong_out(lat,long))
 	return geo
 
-def generateClearancePt(parent, cp_num:str, passingTime:datetime, speed:float, distAboveUKCLim:float, lat:float, long:float):
+def generateClearancePt(parent:etree.Element, cp_num:str, passingTime:datetime, speed:float, distAboveUKCLim:float, lat:float, long:float) -> None:
 	#perhaps we will want leading 0s for the name in the future
 	cp_name = "CP_"+cp_num
-	controlPt = etree.SubElement(parent, "UnderClearanceControlPoint", {"gml:id":cp_name})
+	controlPt = etree.SubElement(parent, "UnderClearanceControlPoint", {GML+"id":cp_name})
 	featureName("CP"+cp_num).gengml(controlPt)
 	genInner(controlPt,"expectedPassingTime",datetime_out(passingTime))
 	genInner(controlPt,"expectedPassingSpeed",str(speed))
@@ -230,17 +262,17 @@ def generateClearancePt(parent, cp_num:str, passingTime:datetime, speed:float, d
 	# TODO: URN
 	generatePoint(controlPt,cp_name+"_GEOM",lat,long)
 
-def printxml(element, **kwargs):
+def printxml(element:etree.Element, **kwargs) -> None:
 	myxml = etree.tostring(element, xml_declaration=True, encoding="utf-8", **kwargs)
 	print(xml.dom.minidom.parseString(myxml.decode()).toprettyxml(), end='')
 
-def writeout(fileName, element, **kwargs):
+def writeout(fileName:str, element:etree.Element, **kwargs):
 	myxml = etree.tostring(element, xml_declaration=True, encoding="utf-8", **kwargs)
 	file = open(fileName, "w")
 	file.write(xml.dom.minidom.parseString(myxml.decode()).toprettyxml())
 	file.close()
 
-def genFileName(issuerID:str,uniqueName:str=""):
+def genFileName(issuerID:str,uniqueName:str="") -> str:
 	#TODO: more graceful error handling?
 	assert(len(issuerID) == 4)
 	assert(len(uniqueName) <= 8)
@@ -250,17 +282,20 @@ def genFileName(issuerID:str,uniqueName:str=""):
 if __name__ == "__main__":
 	fileName = genFileName("STJN","TEST0000")
 	maxVesselDraught = 5.1
+	bounds = {"min":[10, 10],"max":[-10, -10]}
 
 	root = generateRoot()
-	generateBoundary(root,[10, 10, -10, -10])
+	generateBoundary(root,bounds)
 	generateDatasetIdentificationInfo(root,fileName)
+
+	test_gml = """<gml:patches><gml:PolygonPatch><gml:exterior><gml:LinearRing><gml:posList>TODO TODO TODO TODO TODO TODO TODO TODO</gml:posList></gml:LinearRing></gml:exterior></gml:PolygonPatch></gml:patches>"""
 	
 	members = etree.SubElement(root,"members")
 	generateUnderKeelClearancePlan(members,maxVesselDraught)
-	generatePlanArea(members)
+	generatePlanArea(members,test_gml, bounds)
 
-	generateNonNavArea(members)
-	generateAlmostNonNavArea(members)
+	generateNonNavArea(members,test_gml)
+	generateAlmostNonNavArea(members,test_gml)
 	for i in range(5):
 		generateClearancePt(members,
 			str(i),

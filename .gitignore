@@ -1,6 +1,12 @@
 #output files
-*.gml
+out/*
 *.json
+
+#input files
+*.tif
+*.gml
+*.bag
+*.xml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
