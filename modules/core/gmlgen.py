@@ -2,7 +2,7 @@ from lxml import etree
 import xml.dom.minidom
 from enum import Enum
 from datetime import *
-from urnparse import * 
+#from urnparse import * 
 
 #""" add to parent a new child with name name, inner text text, and attributes as an object
 #"""
@@ -253,7 +253,7 @@ def generatePoint(parent:etree.Element, id:str, lat:float, long:float) -> etree.
 def generateClearancePt(parent:etree.Element, cp_num:str, passingTime:datetime, speed:float, distAboveUKCLim:float, lat:float, long:float) -> None:
 	#perhaps we will want leading 0s for the name in the future
 	cp_name = "CP_"+cp_num
-	controlPt = etree.SubElement(parent, "UnderClearanceControlPoint", {GML+"id":cp_name})
+	controlPt = etree.SubElement(parent, "UnderKeelClearanceControlPoint", {GML+"id":cp_name})
 	featureName("CP"+cp_num).gengml(controlPt)
 	genInner(controlPt,"expectedPassingTime",datetime_out(passingTime))
 	genInner(controlPt,"expectedPassingSpeed",str(speed))

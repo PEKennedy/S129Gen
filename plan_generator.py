@@ -38,7 +38,7 @@ if __name__=="__main__":
 	for area in areas["non_nav"]:
 		gg.generateNonNavArea(members,area,i)
 		i += 1
-
+	
 	i:int = 0
 	for area in areas["almost_non_nav"]:
 		gg.generateAlmostNonNavArea(members,area, i)
@@ -51,7 +51,7 @@ if __name__=="__main__":
 			datetime.now() + timedelta(hours=i),
 			1+i*0.1,
 			0.5,
-			-10+i*0.1,140+i*0.1
+			45.19+i*0.01, -66.09+i*0.01
 		)
 	#printxml(root)
 

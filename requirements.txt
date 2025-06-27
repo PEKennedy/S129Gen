@@ -1,8 +1,0 @@
-certifi==2025.4.26
-charset-normalizer==3.4.2
-idna==3.10
-pip3-autoremove==1.2.2
-requests==2.32.3
-typing_extensions==4.13.2
-urllib3==2.4.0
-urnparse==0.2.2

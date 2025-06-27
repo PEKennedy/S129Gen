@@ -2,14 +2,14 @@
 
 ##%matplotlib ipympl # https://matplotlib.org/ipympl/
 
-import unittest
+#import unittest
 from osgeo import gdal, ogr, osr #ogr is vec, gdal is raster
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import numpy as np
-import rasterio
-from affine import Affine
-import rasterio.features
-from shapely.geometry import shape
+#import rasterio
+#from affine import Affine
+#import rasterio.features
+#from shapely.geometry import shape
 
 #https://gis.stackexchange.com/questions/128139/how-to-convert-float-raster-to-vector-with-python-gdal
 #https://gdal.org/en/stable/api/python/osgeo.gdal.html#osgeo.gdal.FPolygonize
@@ -20,6 +20,7 @@ from shapely.geometry import shape
 #TODO: Allow combo of multiple bathymetry sources?
 
 def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str) -> None | object:
+	gdal.UseExceptions()
 	dataset:gdal.Dataset = gdal.Open(input_file, gdal.GA_ReadOnly)
 	if not dataset:
 		print("Failed to load")
@@ -29,31 +30,61 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 			"non_nav":None,
 			"almost_non_nav":None
 		}"""
-	gdal.SetConfigOption("OGR_ORGANIZE_POLYGONS","ONLY_CCW")
+	#gdal.SetConfigOption("OGR_ORGANIZE_POLYGONS","ONLY_CCW")
+	#gdal.SetConfigOption("OGR_ORGANIZE_POLYGONS","ONLY_CW")
 	#src_driver:gdal.Driver = dataset.GetDriver()
  
 	#get projection
 	srs = osr.SpatialReference()
 	srs.ImportFromWkt(dataset.GetProjectionRef())
+	target_ref = osr.SpatialReference()
+	target_ref.ImportFromEPSG(4326)
+	coord_tr = osr.CoordinateTransformation(srs,target_ref)
 
 	#Get the elevation band
 	el_band:gdal.Band = dataset.GetRasterBand(1) #bag band 1: elevation
-
+	
 	#TODO: Clip based on plan area
-
+	print(unsafe_level)
+	print(almost_safe_level)
 	# Reclassify based on safe clearance
 	arr = el_band.ReadAsArray()
+	nodataval = el_band.GetNoDataValue()
+	out = np.full_like(arr, 0)
+	for i in range(out.shape[0]):
+		for j in range(out.shape[1]):
+			val = arr[i,j]
+			if val == nodataval:
+				out[i,j] = 0
+			elif unsafe_level <= val:
+				out[i,j] = 3
+			elif almost_safe_level <= val:
+				out[i,j] = 2
+			#elif unsafe_level <= val:
+			#	out[i,j] = 3
 
+			#elif val != nodataval:
+			else:
+				out[i,j] = 1
+	#el_band.ReadRaster()
+
+	
 	#conditions are inverted because depth is + in the numbers, but ?- in the raster?
-	scanned = np.where(arr != None, 1,0)
-	unsafe = np.where(unsafe_level <= arr,1,0)
-	almost_safe = np.where(np.logical_and(almost_safe_level <= arr, arr < unsafe_level),1,0)
-	#safe = np.where(almost_safe_level > arr,1,0)	
+	#scanned = np.where(arr != nodataval, 1,0)
+	#unsafe = np.where(unsafe_level <= arr,1,0)
+	#almost_safe = np.where(np.logical_and(almost_safe_level <= arr, unsafe_level > arr),1,0)
+
+	scanned = np.where(out != 0, 1,0)
+	unsafe = np.where(out == 3, 1,0)
+	almost_safe = np.where(out == 2, 1,0)
+ 
+#safe = np.where(almost_safe_level > arr,1,0)	
 
 	gdal_mem_driver:gdal.Driver = gdal.GetDriverByName("MEM")
 	tmp_dataset:gdal.Dataset = gdal_mem_driver.CreateCopy('',dataset,0)
 	unsafe_band:gdal.Band = tmp_dataset.GetRasterBand(1) #Get the default band 1
-	
+	#unsafe_band.Fill(unsafe_band.GetNoDataValue())	 #doesnt change anything
+ 
 	tmp_dataset.AddBand(gdal.GFT_Real)
 	tmp_dataset.AddBand(gdal.GFT_Real)
 
@@ -64,23 +95,17 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	unsafe_band.WriteArray(unsafe)
 	almost_safe_band.WriteArray(almost_safe)
 	scanned_band.WriteArray(scanned) #actually want plan area, since safe area is implied
- 
- 	# .........
-	"""plt.figure()
-	plt.imshow(unsafe)
 
-	plt.figure()
-	plt.imshow(almost_safe)
-
-	plt.figure()
-	plt.imshow(safe)"""
+	#tmp_dataset2:gdal.Dataset = gdal_mem_driver.CreateCopy('',tmp_dataset,0)
+	#gdal.Warp(tmp_dataset2,tmp_dataset,dstSRS='EPSG:4326')
+	#tmp_dataset = None
 
 	# Polygonize
  	#https://github.com/OSGeo/gdal/blob/master/autotest/alg/polygonize.py
 	# in memory data source to put results in
-	ogr_mem_driver:ogr.Driver = ogr.GetDriverByName('MEMORY')
+	ogr_mem_driver:ogr.Driver = ogr.GetDriverByName('MEM')
 	mem_datasource:ogr.DataSource = ogr_mem_driver.CreateDataSource("out")
-	mem_layer_scanned:ogr.Layer = mem_datasource.CreateLayer("scanned", None, ogr.wkbLinearRing) #lin ring so 1 feature?
+	mem_layer_scanned:ogr.Layer = mem_datasource.CreateLayer("scanned", None, ogr.wkbMultiPolygon)#ogr.wkbLinearRing) #lin ring so 1 feature?
 	mem_layer_unsafe:ogr.Layer = mem_datasource.CreateLayer("unsafe",None,ogr.wkbMultiPolygon)	
 	mem_layer_almost_safe:ogr.Layer = mem_datasource.CreateLayer("almost_safe",None,ogr.wkbMultiPolygon)
  
@@ -95,6 +120,9 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	gdal.FPolygonize(unsafe_band,None,mem_layer_unsafe,0)
 	gdal.FPolygonize(almost_safe_band,None,mem_layer_almost_safe,0)
 
+	#Free memory
+	#mem_datasource = None
+
 	#separate by value (unsafe, almost safe), safe is implied by plan area
 	print("feature counts (scanned, non-nav, almost-nav):")
 	print(mem_layer_scanned.GetFeatureCount())
@@ -107,25 +135,44 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	almost_unnavigable_areas = []
 
 	#export to GML
-	for i in range(mem_layer_scanned.GetFeatureCount()):
+	combined_geo:ogr.Geometry = ogr.Geometry(ogr.wkbGeometryCollection)
+	for i in range(mem_layer_scanned.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_scanned.GetFeature(i)
+		#feature.
 		geom:ogr.Geometry = feature.geometry()
 		geom.AssignSpatialReference(srs)
+
+		geom.Transform(coord_tr) #.SetPrecision(...) or .roundCoordinates()
+		geom.CloseRings()
+
+		combined_geo = combined_geo.Union(geom)
+		
+		#mem_layer_scanned.Union()
 		bounds = geom.GetEnvelope() #minx: float maxx: float miny: float maxy: float
 		#print(bounds)
 		bounds = {"min":[bounds[0],bounds[2]], "max": [bounds[1],bounds[3]]}
-		scanned_areas.append(geom.ExportToGML())
+		#scanned_areas.append(geom.ExportToGML())
+	#double ratio, bool allow holes
+	combined_geo = combined_geo.ConcaveHull(0.4,True)
+	combined_geo.CloseRings()
+	
+	scanned_areas.insert(0,combined_geo.ExportToGML())
 
-	for i in range(mem_layer_unsafe.GetFeatureCount()):
+	#-1 because the last feature in the list is everything outside the unsafe areas
+	for i in range(mem_layer_unsafe.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_unsafe.GetFeature(i)
 		geom:ogr.Geometry = feature.geometry()
 		geom.AssignSpatialReference(srs)
+		geom.Transform(coord_tr)
+		geom.CloseRings()
 		unnavigable_areas.append(geom.ExportToGML())
 	
-	for i in range(mem_layer_almost_safe.GetFeatureCount()):
+	for i in range(mem_layer_almost_safe.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_almost_safe.GetFeature(i)
 		geom:ogr.Geometry = feature.geometry()
 		geom.AssignSpatialReference(srs)
+		geom.Transform(coord_tr)
+		geom.CloseRings()
 		almost_unnavigable_areas.append(geom.ExportToGML())
 
 	return {
