@@ -31,7 +31,7 @@ if __name__=="__main__":
 	members = etree.SubElement(root,"members")
 	gg.generateUnderKeelClearancePlan(members,maxVesselDraught)
 	
-	scanned_area = areas["scanned"][0]
+	scanned_area:str = areas["scanned"]
 	gg.generatePlanArea(members, scanned_area, bounds)
 
 	i:int = 0

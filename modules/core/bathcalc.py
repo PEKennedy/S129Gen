@@ -1,22 +1,14 @@
-#%%
-
 ##%matplotlib ipympl # https://matplotlib.org/ipympl/
 
 #import unittest
-from osgeo import gdal, ogr, osr #ogr is vec, gdal is raster
-#import matplotlib.pyplot as plt
+from osgeo import gdal, ogr, osr
 import numpy as np
-#import rasterio
-#from affine import Affine
-#import rasterio.features
-#from shapely.geometry import shape
 
 #https://gis.stackexchange.com/questions/128139/how-to-convert-float-raster-to-vector-with-python-gdal
 #https://gdal.org/en/stable/api/python/osgeo.gdal.html#osgeo.gdal.FPolygonize
 #https://gdal.org/en/stable/programs/gdal_raster_polygonize.html
 
 #TODO: Allow per-pixel clearance calculation (callback function likely)
-#TODO: Return plan area as polygonization of scanned area
 #TODO: Allow combo of multiple bathymetry sources?
 
 def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str) -> None | object:
@@ -43,7 +35,7 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 
 	#Get the elevation band
 	el_band:gdal.Band = dataset.GetRasterBand(1) #bag band 1: elevation
-	
+	el_band.ReadRaster()
 	#TODO: Clip based on plan area
 	print(unsafe_level)
 	print(almost_safe_level)
@@ -51,6 +43,7 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	arr = el_band.ReadAsArray()
 	nodataval = el_band.GetNoDataValue()
 	out = np.full_like(arr, 0)
+	clearance = np.full_like(arr, 0) #clearance values for the almost-navigable areas
 	for i in range(out.shape[0]):
 		for j in range(out.shape[1]):
 			val = arr[i,j]
@@ -77,28 +70,22 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	scanned = np.where(out != 0, 1,0)
 	unsafe = np.where(out == 3, 1,0)
 	almost_safe = np.where(out == 2, 1,0)
- 
-#safe = np.where(almost_safe_level > arr,1,0)	
 
 	gdal_mem_driver:gdal.Driver = gdal.GetDriverByName("MEM")
 	tmp_dataset:gdal.Dataset = gdal_mem_driver.CreateCopy('',dataset,0)
-	unsafe_band:gdal.Band = tmp_dataset.GetRasterBand(1) #Get the default band 1
+	scanned_band:gdal.Band = tmp_dataset.GetRasterBand(1) #Get the default band 1 #unsafe_band
 	#unsafe_band.Fill(unsafe_band.GetNoDataValue())	 #doesnt change anything
  
 	tmp_dataset.AddBand(gdal.GFT_Real)
 	tmp_dataset.AddBand(gdal.GFT_Real)
 
 	almost_safe_band:gdal.Band = tmp_dataset.GetRasterBand(2)
-	scanned_band:gdal.Band = tmp_dataset.GetRasterBand(3)
+	unsafe_band:gdal.Band = tmp_dataset.GetRasterBand(3) #scanned_band
 
 	#reclass_band.WriteArray(reclass)
 	unsafe_band.WriteArray(unsafe)
 	almost_safe_band.WriteArray(almost_safe)
 	scanned_band.WriteArray(scanned) #actually want plan area, since safe area is implied
-
-	#tmp_dataset2:gdal.Dataset = gdal_mem_driver.CreateCopy('',tmp_dataset,0)
-	#gdal.Warp(tmp_dataset2,tmp_dataset,dstSRS='EPSG:4326')
-	#tmp_dataset = None
 
 	# Polygonize
  	#https://github.com/OSGeo/gdal/blob/master/autotest/alg/polygonize.py
@@ -130,59 +117,74 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	print(mem_layer_almost_safe.GetFeatureCount())
 
 	bounds = {}
-	scanned_areas = []
+	#scanned_areas = []
 	unnavigable_areas = []
 	almost_unnavigable_areas = []
 
+	gml_settings = {"FORMAT":"GML3.2", "SRSNAME_FORMAT":"SHORT"}
+	#print("blabla " + str(mem_layer_scanned.GetFeatureCount()-1))
 	#export to GML
-	combined_geo:ogr.Geometry = ogr.Geometry(ogr.wkbGeometryCollection)
+	combined_geo:ogr.Geometry = ogr.Geometry(ogr.wkbGeometryCollection)#ogr.wkbMultiPolygon)#ogr.wkbGeometryCollection)
 	for i in range(mem_layer_scanned.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_scanned.GetFeature(i)
-		#feature.
 		geom:ogr.Geometry = feature.geometry()
 		geom.AssignSpatialReference(srs)
-
 		geom.Transform(coord_tr) #.SetPrecision(...) or .roundCoordinates()
 		geom.CloseRings()
+		#combined_geo = combined_geo.Union(geom)
+		combined_geo.AddGeometry(geom)
 
-		combined_geo = combined_geo.Union(geom)
-		
-		#mem_layer_scanned.Union()
 		bounds = geom.GetEnvelope() #minx: float maxx: float miny: float maxy: float
-		#print(bounds)
 		bounds = {"min":[bounds[0],bounds[2]], "max": [bounds[1],bounds[3]]}
-		#scanned_areas.append(geom.ExportToGML())
-	#double ratio, bool allow holes
+		#print(i)
+	#print("x")
+	#double ratio, bool allow holes. This silently crashes now??
 	combined_geo = combined_geo.ConcaveHull(0.4,True)
+	#combined_geo = combined_geo.ConvexHull()
+	#print("y")
 	combined_geo.CloseRings()
-	
-	scanned_areas.insert(0,combined_geo.ExportToGML())
-
+	#combined_geo = ogr.ForceTo(combined_geo,ogr.wkbMultiSurface)
+	#print("type: "+ str(combined_geo.GetGeometryType()))
+	scanned_areas:str = combined_geo.ExportToGML(options=gml_settings) #, "WRITE_FEATURE_BOUNDED_BY":"YES"
+	#print("xyz")
 	#-1 because the last feature in the list is everything outside the unsafe areas
 	for i in range(mem_layer_unsafe.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_unsafe.GetFeature(i)
+		#feature.
 		geom:ogr.Geometry = feature.geometry()
+		geom.BuildArea()
 		geom.AssignSpatialReference(srs)
 		geom.Transform(coord_tr)
 		geom.CloseRings()
-		unnavigable_areas.append(geom.ExportToGML())
-	
+		geo_str = geom.ExportToGML(options=gml_settings)
+		#geo_str = re.sub('<gml:Polygon[ \S]*>',"<gml:patches><gml:PolygonPatch>", geo_str)
+		#geo_str = re.sub('</gml:Polygon[ \S]*>',"</gml:patches></gml:PolygonPatch>", geo_str)
+		#geo_str = geo_str.replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
+		#unnavigable_areas.append(geom.ExportToGML(options=gml_settings).replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>"))
+		unnavigable_areas.append(geo_str)
+	#print("x")
 	for i in range(mem_layer_almost_safe.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_almost_safe.GetFeature(i)
 		geom:ogr.Geometry = feature.geometry()
 		geom.AssignSpatialReference(srs)
 		geom.Transform(coord_tr)
 		geom.CloseRings()
-		almost_unnavigable_areas.append(geom.ExportToGML())
+		geo_str = geom.ExportToGML(options=gml_settings)
+		#geo_str = geo_str.replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
+		almost_unnavigable_areas.append(geo_str)
+	#print("y")
+	#print(scanned_areas)
+	#pat = re.compile("x")
+	#pat.
+	#scanned_areas = scanned_areas.replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
+	#scanned_areas = scanned_areas.replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
 
 	return {
-		"bounds": bounds,
+		"bounds":  bounds,
 		"scanned": scanned_areas,
-		"non_nav":unnavigable_areas,
-		"almost_non_nav":almost_unnavigable_areas
+		"non_nav": unnavigable_areas,
+		"almost_non_nav": almost_unnavigable_areas
 	}
-
-# %%
 
 if __name__ == "__main__":
 	tide = 1

@@ -48,12 +48,12 @@ datasetPurposeText = {
 #must be 2 "new edition" (default) or 5 "cancellation"
 #TODO" is this necessary?
 class s100_purpose(Enum):
-    newDataset = 1
-    newEdition = 2
-    update = 3
-    reissue = 4
-    cancellation = 5
-    delta = 6
+	newDataset = 1
+	newEdition = 2
+	update = 3
+	reissue = 4
+	cancellation = 5
+	delta = 6
 """
 
 ### S-129 datatypes
@@ -131,8 +131,8 @@ def generateRoot(id:str="TODO") -> etree.Element:
 		GML+"id":id,
 	}
 	el = etree.Element("Dataset",
-                    attrib=attribs,
-                    nsmap=nsmap)
+					attrib=attribs,
+					nsmap=nsmap)
 	return el
 
 #TODO: get rid of hard coded EPSG, use the one provided by
