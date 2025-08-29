@@ -348,7 +348,6 @@ if __name__ == "__main__":
 	rel_water_spd_kn = relative_vel(vessel.spd_kn,vessel.course,ocean.cur_spd_kn,ocean.cur_heading)[0]
 	rel_water_spd_ms = 0.514*rel_water_spd_kn
 	print("spd kn "+str(rel_water_spd_kn)+" spd ms "+str(rel_water_spd_ms))
-	#print(rel_water_spd_ms)
 	fr=froude(rel_water_spd_ms)
 	fr_er = err_froude(rel_water_spd_ms,rel_water_spd_ms*0.1)
 	pr_prop("froude number",fr,fr_er)

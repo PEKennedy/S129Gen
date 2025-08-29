@@ -4,12 +4,8 @@
 from osgeo import gdal, ogr, osr
 import numpy as np
 
-#https://gis.stackexchange.com/questions/128139/how-to-convert-float-raster-to-vector-with-python-gdal
-#https://gdal.org/en/stable/api/python/osgeo.gdal.html#osgeo.gdal.FPolygonize
-#https://gdal.org/en/stable/programs/gdal_raster_polygonize.html
-
 #TODO: Allow per-pixel clearance calculation (callback function likely)
-#TODO: Allow combo of multiple bathymetry sources?
+#TODO: Allow combo of multiple bathymetry sources
 
 def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str) -> None | object:
 	gdal.UseExceptions()
@@ -17,15 +13,7 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	if not dataset:
 		print("Failed to load")
 		return None
-		"""return {
-			"scanned":None
-			"non_nav":None,
-			"almost_non_nav":None
-		}"""
-	#gdal.SetConfigOption("OGR_ORGANIZE_POLYGONS","ONLY_CCW")
-	#gdal.SetConfigOption("OGR_ORGANIZE_POLYGONS","ONLY_CW")
-	#src_driver:gdal.Driver = dataset.GetDriver()
- 
+
 	#get projection
 	srs = osr.SpatialReference()
 	srs.ImportFromWkt(dataset.GetProjectionRef())
@@ -43,7 +31,7 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	arr = el_band.ReadAsArray()
 	nodataval = el_band.GetNoDataValue()
 	out = np.full_like(arr, 0)
-	clearance = np.full_like(arr, 0) #clearance values for the almost-navigable areas
+	#clearance = np.full_like(arr, 0) #clearance values for the almost-navigable areas
 	for i in range(out.shape[0]):
 		for j in range(out.shape[1]):
 			val = arr[i,j]
@@ -53,19 +41,8 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 				out[i,j] = 3
 			elif almost_safe_level <= val:
 				out[i,j] = 2
-			#elif unsafe_level <= val:
-			#	out[i,j] = 3
-
-			#elif val != nodataval:
 			else:
 				out[i,j] = 1
-	#el_band.ReadRaster()
-
-	
-	#conditions are inverted because depth is + in the numbers, but ?- in the raster?
-	#scanned = np.where(arr != nodataval, 1,0)
-	#unsafe = np.where(unsafe_level <= arr,1,0)
-	#almost_safe = np.where(np.logical_and(almost_safe_level <= arr, unsafe_level > arr),1,0)
 
 	scanned = np.where(out != 0, 1,0)
 	unsafe = np.where(out == 3, 1,0)
@@ -74,7 +51,6 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	gdal_mem_driver:gdal.Driver = gdal.GetDriverByName("MEM")
 	tmp_dataset:gdal.Dataset = gdal_mem_driver.CreateCopy('',dataset,0)
 	scanned_band:gdal.Band = tmp_dataset.GetRasterBand(1) #Get the default band 1 #unsafe_band
-	#unsafe_band.Fill(unsafe_band.GetNoDataValue())	 #doesnt change anything
  
 	tmp_dataset.AddBand(gdal.GFT_Real)
 	tmp_dataset.AddBand(gdal.GFT_Real)
@@ -82,7 +58,6 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	almost_safe_band:gdal.Band = tmp_dataset.GetRasterBand(2)
 	unsafe_band:gdal.Band = tmp_dataset.GetRasterBand(3) #scanned_band
 
-	#reclass_band.WriteArray(reclass)
 	unsafe_band.WriteArray(unsafe)
 	almost_safe_band.WriteArray(almost_safe)
 	scanned_band.WriteArray(scanned) #actually want plan area, since safe area is implied
@@ -96,8 +71,6 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	mem_layer_unsafe:ogr.Layer = mem_datasource.CreateLayer("unsafe",None,ogr.wkbMultiPolygon)	
 	mem_layer_almost_safe:ogr.Layer = mem_datasource.CreateLayer("almost_safe",None,ogr.wkbMultiPolygon)
  
- 	#is this necessary?? >> yes it is
-	#what does "DN" stand for?
 	mem_field = ogr.FieldDefn("DN",ogr.OFTReal)
 	mem_layer_scanned.CreateField(mem_field)
 	mem_layer_unsafe.CreateField(mem_field)
@@ -117,12 +90,10 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 	print(mem_layer_almost_safe.GetFeatureCount())
 
 	bounds = {}
-	#scanned_areas = []
 	unnavigable_areas = []
 	almost_unnavigable_areas = []
 
 	gml_settings = {"FORMAT":"GML3.2", "SRSNAME_FORMAT":"SHORT"}
-	#print("blabla " + str(mem_layer_scanned.GetFeatureCount()-1))
 	#export to GML
 	combined_geo:ogr.Geometry = ogr.Geometry(ogr.wkbGeometryCollection)#ogr.wkbMultiPolygon)#ogr.wkbGeometryCollection)
 	for i in range(mem_layer_scanned.GetFeatureCount()-1):
@@ -131,38 +102,28 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 		geom.AssignSpatialReference(srs)
 		geom.Transform(coord_tr) #.SetPrecision(...) or .roundCoordinates()
 		geom.CloseRings()
-		#combined_geo = combined_geo.Union(geom)
 		combined_geo.AddGeometry(geom)
 
 		bounds = geom.GetEnvelope() #minx: float maxx: float miny: float maxy: float
 		bounds = {"min":[bounds[0],bounds[2]], "max": [bounds[1],bounds[3]]}
-		#print(i)
-	#print("x")
+
 	#double ratio, bool allow holes. This silently crashes now??
 	combined_geo = combined_geo.ConcaveHull(0.4,True)
-	#combined_geo = combined_geo.ConvexHull()
-	#print("y")
 	combined_geo.CloseRings()
-	#combined_geo = ogr.ForceTo(combined_geo,ogr.wkbMultiSurface)
-	#print("type: "+ str(combined_geo.GetGeometryType()))
-	scanned_areas:str = combined_geo.ExportToGML(options=gml_settings) #, "WRITE_FEATURE_BOUNDED_BY":"YES"
+
+	scanned_areas:str = combined_geo.ExportToGML(options=gml_settings)
 	#print("xyz")
 	#-1 because the last feature in the list is everything outside the unsafe areas
 	for i in range(mem_layer_unsafe.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_unsafe.GetFeature(i)
-		#feature.
 		geom:ogr.Geometry = feature.geometry()
 		geom.BuildArea()
 		geom.AssignSpatialReference(srs)
 		geom.Transform(coord_tr)
 		geom.CloseRings()
 		geo_str = geom.ExportToGML(options=gml_settings)
-		#geo_str = re.sub('<gml:Polygon[ \S]*>',"<gml:patches><gml:PolygonPatch>", geo_str)
-		#geo_str = re.sub('</gml:Polygon[ \S]*>',"</gml:patches></gml:PolygonPatch>", geo_str)
-		#geo_str = geo_str.replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
-		#unnavigable_areas.append(geom.ExportToGML(options=gml_settings).replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>"))
 		unnavigable_areas.append(geo_str)
-	#print("x")
+
 	for i in range(mem_layer_almost_safe.GetFeatureCount()-1):
 		feature:ogr.Feature = mem_layer_almost_safe.GetFeature(i)
 		geom:ogr.Geometry = feature.geometry()
@@ -170,14 +131,7 @@ def get_unsafe_areas(unsafe_level:float, almost_safe_level:float, input_file:str
 		geom.Transform(coord_tr)
 		geom.CloseRings()
 		geo_str = geom.ExportToGML(options=gml_settings)
-		#geo_str = geo_str.replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
 		almost_unnavigable_areas.append(geo_str)
-	#print("y")
-	#print(scanned_areas)
-	#pat = re.compile("x")
-	#pat.
-	#scanned_areas = scanned_areas.replace("<gml:Polygon>","<gml:patches><gml:PolygonPatch>").replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
-	#scanned_areas = scanned_areas.replace("</gml:Polygon>","</gml:patches></gml:PolygonPatch>")
 
 	return {
 		"bounds":  bounds,
